@@ -1,4 +1,4 @@
-# Authenta-Chrome-Plugin
+# Authenta-GMeet
 
 This repository contains the code for the chrome plugin of Authenta.
 
@@ -8,8 +8,8 @@ To test the Authenta Chrome Plugin locally, follow these steps:
 
 1. **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/authenta-chrome-plugin.git
-    cd authenta-chrome-plugin
+    git clone https://github.com/vigneshauthenta/authenta-gmeet.git
+    cd authenta-gmeet
     ```
 
 2. **Install dependencies (if applicable):**
