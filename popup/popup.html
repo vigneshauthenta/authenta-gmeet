@@ -30,11 +30,17 @@
       text-align: center;
     }
   </style>
+
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 
 <body>
-  <img src="../icon.png" class="meet-icon" alt="Authenta DFS" />
-  <div class="header">Authenta Detect</div>
+  <div class="flex items-center justify-center gap-7">
+
+    <img src="../icon.png" class="meet-icon" alt="Authenta DFS" />
+    <div class="header">Authenta Detect</div>
+    
+  </div>
 
   <form id="login-form" class="hidden" autocomplete="off">
     <input type="email" id="email" placeholder="Email" required
@@ -47,11 +53,9 @@
     <div id="status" class="status"></div>
   </form>
 
-  <div id="analyze-message" class="status hidden">
-    <b>Your meet would now be analyzed</b>
-  </div>
-
+ 
   <script src="popup.js"></script>
+ 
 </body>
 
 </html>

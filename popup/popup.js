@@ -1,12 +1,11 @@
- 
+
 document.addEventListener("DOMContentLoaded", function () {
   const form = document.getElementById("login-form");
   const statusDiv = document.getElementById("status");
   const analyzeMsg = document.getElementById("analyze-message");
   const loginBtn = document.getElementById("loginBtn");
   const loginSpinner = document.getElementById("loginSpinner");
-
-  // Check login state
+ 
   chrome.storage.local.get(["token"], function (result) {
     if (result.token) {
       form.classList.add("hidden");
@@ -53,4 +52,5 @@ document.addEventListener("DOMContentLoaded", function () {
       loginSpinner.classList.add("hidden");
     }
   });
-});
+}); 
+

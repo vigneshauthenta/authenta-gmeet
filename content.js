@@ -1,7 +1,3 @@
-function isGMeet() {
-  return window.location.hostname.includes("meet.google.com");
-}
-
 async function getToken() {
   return new Promise((resolve) => {
     chrome.storage.local.get(["token"], ({ token }) => {
@@ -10,104 +6,156 @@ async function getToken() {
   });
 }
 
-// Utility: Poll for processing status
-async function pollMediaStatus(mid, token, maxTries = 20) {
-  let tries = 0;
-  let media;
-  while (tries < maxTries) {
-    const statusResponse = await fetch(
-      `https://platform.authenta.ai/api/media/${mid}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
-    media = await statusResponse.json();
-    if (media.status === "PROCESSED") break;
-    await new Promise((resolve) =>
-      setTimeout(resolve, media.status === "UPLOADED" ? 5000 : 1500)
-    );
-    tries++;
+function showStatus(message) {
+  let overlay = document.getElementById("authenta-status-overlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "authenta-status-overlay";
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: "20px",
+      right: "20px",
+      zIndex: 99999,
+      background: "#222",
+      color: "#fff",
+      padding: "16px 24px",
+      borderRadius: "8px",
+      fontSize: "16px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+      fontFamily: "sans-serif",
+      transition: "opacity 0.3s",
+    });
+    document.body.appendChild(overlay);
   }
-  if (media.status !== "PROCESSED") throw new Error("Processing timed out");
-  return media;
+  overlay.textContent = message;
+  overlay.style.display = "block";
 }
 
-// Main upload function, similar to uploadSingle in your hook
+function hideStatus() {
+  const overlay = document.getElementById("authenta-status-overlay");
+  if (overlay) overlay.style.display = "none";
+}
+
 async function uploadVideoFile({ file, modelType = "DF-1", onProgress }) {
-  const token = await getToken();
-  if (!token) throw new Error("Not logged in.");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = function () {
+      chrome.runtime.sendMessage(
+        {
+          type: "uploadVideo",
+          fileData: Array.from(new Uint8Array(reader.result)),
 
-  // Step 1: POST metadata
-  const metaResponse = await fetch("https://platform.authenta.ai/api/media", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      name: file.name.replace(/\.[^/.]+$/, ""),
-      contentType: file.type,
-      size: file.size,
-      modelType,
-    }),
+          fileName: file.name,
+          fileType: file.type,
+          modelType,
+        },
+        (response) => {
+          if (response && response.error) {
+            reject(new Error(response.error));
+          } else {
+            resolve(response.media);
+          }
+        }
+      );
+    };
+    reader.onerror = function (e) {
+      reject(new Error("Failed to read file"));
+    };
+    reader.readAsArrayBuffer(file);
   });
-  const metaData = await metaResponse.json();
-  if (!metaResponse.ok) {
-    throw new Error(metaData.message || "Failed to get upload URL");
-  }
+};
 
-  // Step 2: PUT the video to uploadUrl (with progress if possible)
-  await fetch(metaData.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": file.type },
-    body: file,
-  });
-  if (onProgress) onProgress(100);
+const analyzedParticipants = new Set();
 
-  // Step 3: Poll for processing status
-  const media = await pollMediaStatus(metaData.mid, token);
-  return media;
+function isOwnTile(tile) {
+  const label = tile.getAttribute('aria-label') || '';
+  return /you\b/i.test(label);
 }
 
-// Record and upload the user's video
-async function recordAndSendOwnVideo() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    let chunks = [];
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-
-    recorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: "video/webm" });
-      const file = new File([blob], "gmeet-own-user-video.webm", { type: "video/webm" });
-
-      try {
-        // Optionally, show progress UI here
-        const media = await uploadVideoFile({
-          file,
-          modelType: "DF-1",
-          onProgress: (progress) => {
-            // You can update a progress bar here if you wish
-            console.log(`Upload progress: ${progress}%`);
-          },
-        });
-        // Optionally, handle/display the result here
-        console.log("Video processed:", media);
-      } catch (err) {
-        console.error("Upload failed:", err.message);
+function observeParticipantVideos(onNewVideo) {
+  const seen = new Set();
+  function scan() {
+    const videos = document.querySelectorAll('[data-participant-id] video');
+    videos.forEach(video => {
+      const tile = video.closest('[data-participant-id]');
+      if (!tile) return;
+      const participantId = tile.getAttribute('data-participant-id'); 
+      if (
+        participantId &&
+        !seen.has(participantId) &&
+        !analyzedParticipants.has(participantId) &&
+        !isOwnTile(tile)
+      ) {
+        seen.add(participantId);
+        onNewVideo(video, participantId);
       }
-    };
-
-    recorder.start();
-    setTimeout(() => recorder.stop(), 10000); // 10 seconds
-  } catch (err) {
-    console.error("Own video recording failed:", err);
+    });
   }
+  scan();
+  const observer = new MutationObserver(() => scan());
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
-if (isGMeet()) {
-  recordAndSendOwnVideo();
+async function recordTileVideo(video, participantId, durationMs = 5000, fps = 10) {
+  if (video.videoWidth === 0 || video.videoHeight === 0) {
+    setTimeout(() => recordTileVideo(video, participantId, durationMs, fps), 500);
+    return;
+  }
+  analyzedParticipants.add(participantId); // Mark as analyzed
+
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  const stream = canvas.captureStream(fps);
+  const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+  let chunks = [];
+
+  recorder.ondataavailable = (e) => {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+
+  recorder.onstop = async () => {
+    const blob = new Blob(chunks, { type: "video/webm" });
+    const file = new File([blob], "gmeet-participant-tile.webm", { type: "video/webm" });
+    showStatus("Uploading participant tile video...");
+    try {
+      const media = await uploadVideoFile({
+        file,
+        modelType: "DF-1",
+        onProgress: (progress) => {
+          showStatus(`Uploading tile video... ${progress}%`);
+        },
+      });
+      showStatus("Processing tile video...");
+      setTimeout(() => {
+        showStatus("Done! Tile video processed.");
+      }, 1000);
+      setTimeout(hideStatus, 3000);
+      console.log("Tile video processed:", media);
+    } catch (err) {
+      showStatus("Upload failed: " + err.message); 
+    }
+  };
+
+  recorder.start();
+
+  // Draw frames to canvas at the desired FPS
+  let running = true;
+  function drawFrame() {
+    if (!running) return;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    setTimeout(drawFrame, 1000 / fps);
+  }
+  drawFrame();
+
+  setTimeout(() => {
+    running = false;
+    recorder.stop();
+  }, durationMs);
 }
+
+observeParticipantVideos((video, participantId) => { 
+  console.log("New participant video detected!", participantId, video);
+  recordTileVideo(video, participantId, 5000, 10); // Record for 5 seconds at 10 FPS
+}); 

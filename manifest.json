@@ -3,7 +3,12 @@
   "name": "Authenta Check",
   "version": "1.0",
   "description": "Detect Video Face Swaps",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": [
+  "storage",
+  "activeTab",
+  "scripting",
+  "contextMenus"
+],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
